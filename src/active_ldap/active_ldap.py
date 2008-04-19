@@ -14,6 +14,9 @@ class CacheDecorator(object):
 		self._result = self._fun(*args, **kwds)
 		return self._result
 	
+	def reload(self):
+		self._result = None
+	
 	def __call__(self, fun):
 		self._fun = fun
 		return self._cached_fun
@@ -29,30 +32,82 @@ class ForeignKey(object):
 		self.other_class = other_class
 		self.attribute   = attribute
 
+class NullConnection(object):
+	def search_s(self, *args, **kw): return []
+	def add_s(self, *args, **kw): return []
+	def modify_s(self, *args, **kw): return []
+	def delete_s(self, *args, **kw): return []
+
 class LdapFetcher(type):
 	"""
 	This class autogenerates the ldap fields
 	"""
 
 	def __init__(cls, name, bases, dct):
+		if not hasattr(cls, 'connection'):
+			cls.connection = NullConnection()
+
+		cls._create_has_many_list(name, bases, dct)
 		foreigns = filter(lambda key: isinstance(dct[key], ForeignKey), dct)
 		for foreign_name in foreigns:
 			cls._create_has_many(foreign_name, name, bases, dct)
 
+		super(LdapFetcher, cls).__init__(name, bases, dct)
+	
+	def _create_has_many_list(cls, name, bases, dct):
+		def get_has_many_list(self):
+			if not hasattr(self, '_has_many_list'):
+				self._has_many_list = []
+			return self._has_many_list
+		def set_has_many_list(self, list):
+			self._has_many_list = list
+		setattr(
+			cls, 
+			'has_many_list', 
+			property(get_has_many_list, set_has_many_list)
+		)
+
+		def reload_cache(self):
+			""" reloads the cached has_many-attributes """
+			for i in self.has_many_list:
+				setattr(self, i, None)
+		setattr(cls, 'reload_cache', reload_cache)
+		
 	def _create_has_many(cls, foreign_name, name, bases, dct):
 		foreign = dct[foreign_name]
-		@CacheDecorator()
+		singular_name = "_%s" % foreign_name
+		plural_name = "_%ss" % name.lower()
 		def fetch_object(self):
-			return foreign.other_class.find_by_id(
-				getattr(self, foreign.attribute)
-			)
-		@CacheDecorator()
+			""" 
+			this method fetches the single other FSK-Object and caches in an
+			instance variable.
+			"""
+			if singular_name not in self.has_many_list:
+				self.has_many_list.append(singular_name)
+			if not hasattr(self, singular_name) or \
+				getattr(self, singular_name) is None:
+
+				setattr(self, singular_name, foreign.other_class.find_by_id(
+					getattr(self, foreign.attribute)
+				))
+			return getattr(self, singular_name)
+
 		def fetch_objects(self):
-			return cls.find(
-				"(%s=%s)" % (
-					foreign.attribute, getattr(self,
-					foreign.attribute)
-			))
+			""" 
+			this method fetches multiple other FSK-Objects and caches them 
+			in an instance variable.
+			"""
+			if plural_name not in self.has_many_list:
+				self.has_many_list.append(plural_name)
+			if not hasattr(self, plural_name) or \
+				getattr(self, plural_name) is None:
+
+				setattr(self, plural_name, cls.find(
+					"(%s=%s)" % (
+						foreign.attribute, getattr(self,
+						foreign.attribute)
+				)))
+			return getattr(self, plural_name)
 		setattr(cls, foreign_name, property(fget=fetch_object))
 		setattr(
 			foreign.other_class,
@@ -123,7 +178,7 @@ class Base(object):
 			filter
 		)
 		if len(results) == 0: return None
-		return cls(results[0][1])
+		return cls(results[0][1], results[0][0])
 
 	@classmethod
 	def find_all(cls):
@@ -135,7 +190,7 @@ class Base(object):
 			cls.scope,
 			'(&%s)' % cls._classes_string()
 		)
-		return map(lambda (id, attrs): cls(attrs), results)
+		return map(lambda (id, attrs): cls(attrs, id), results)
 	
 	@classmethod
 	def find(cls, filter):
@@ -145,7 +200,7 @@ class Base(object):
 			cls.scope,
 			'(&%s%s)' % (cls._classes_string(), filter)
 		)
-		return map(lambda (id, attrs): cls(attrs), results)
+		return map(lambda (id, attrs): cls(attrs, id), results)
 
 	# ---- creation methods -----
 	def save(self):
@@ -236,52 +291,52 @@ class Base(object):
 			return self.after_collect_attributes(attrs)
 		return attrs
 		
-class Device(Base):
-	"""
-	This class represents a Device
-	"""
-	object_classes = ( 
-		'voipDevice',
-	)
-	attributes = (
-		'voipDeviceID',
-		'voipPhoneNumber',
-		'voipDeviceMac',
-		'voipDeviceTyp',
-		'voipDeviceIP',
-	)
-	dn_attribute = 'voipDeviceID'
-	prefix = 'ou=voip,o=schule'
-	scope = ( ldap.SCOPE_SUBTREE )
-
-
-class User(Base):
-	"""
-	This class represents a LdapUser
-	"""
-	object_classes = ( 
-		'voipUser',
-		'User',
-		'organizationalPerson' 
-	)
-	attributes = (
-		'sn',
-		'telephoneNumber',
-		'uid',
-		'mail',
-		'voipDeviceID',
-		'givenName',
-		'cn'
-	)
-	dn_attribute = 'uid'
-	prefix = 'ou=user,o=schule'
-	scope = ( ldap.SCOPE_SUBTREE )
-	device = ForeignKey(Device, 'voipDeviceID')
-
-	def after_collect_attributes(self, attrs):
-		number = filter(lambda i: i[1] == 'telephoneNumber', attrs)[0][2]
-		attrs.append((ldap.MOD_REPLACE, 'voipPhoneNumber', number))
-		return attrs
+#class Device(Base):
+#	"""
+#	This class represents a Device
+#	"""
+#	object_classes = ( 
+#		'voipDevice',
+#	)
+#	attributes = (
+#		'voipDeviceID',
+#		'voipPhoneNumber',
+#		'voipDeviceMac',
+#		'voipDeviceTyp',
+#		'voipDeviceIP',
+#	)
+#	dn_attribute = 'voipDeviceID'
+#	prefix = 'ou=voip,o=schule'
+#	scope = ( ldap.SCOPE_SUBTREE )
+#
+#
+#class User(Base):
+#	"""
+#	This class represents a LdapUser
+#	"""
+#	object_classes = ( 
+#		'voipUser',
+#		'User',
+#		'organizationalPerson' 
+#	)
+#	attributes = (
+#		'sn',
+#		'telephoneNumber',
+#		'uid',
+#		'mail',
+#		'voipDeviceID',
+#		'givenName',
+#		'cn'
+#	)
+#	dn_attribute = 'uid'
+#	prefix = 'ou=user,o=schule'
+#	scope = ( ldap.SCOPE_SUBTREE )
+#	device = ForeignKey(Device, 'voipDeviceID')
+#
+#	def after_collect_attributes(self, attrs):
+#		number = filter(lambda i: i[1] == 'telephoneNumber', attrs)[0][2]
+#		attrs.append((ldap.MOD_REPLACE, 'voipPhoneNumber', number))
+#		return attrs
 
 if __name__ == '__main__':
 	u = User({

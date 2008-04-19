@@ -324,20 +324,20 @@ class Delete(object):
 		self.controller.verify()
 
 class HasMany(object):
-	@pyspec.context(group=1)
-	def a_has_many_relationship(self):
+	def setup_has_many(self, times=1):
 		self.controller = pymock.Controller()
 		self.search_s_mock = self.controller.mock()
-		self.controller.expectAndReturn(self.search_s_mock(
-			'ou=user,o=schule',
-			ldap.SCOPE_SUBTREE,
-			'(&(objectClass=klass1)(attribute1=tester))'
-		), test_data)
-		self.controller.expectAndReturn(self.search_s_mock(
-			'ou=user,o=schule',
-			ldap.SCOPE_SUBTREE,
-			'(&(objectClass=klass4)(attribute1=tester))'
-		), test_data[-1:])
+		for i in xrange(times):
+			self.controller.expectAndReturn(self.search_s_mock(
+				'ou=user,o=schule',
+				ldap.SCOPE_SUBTREE,
+				'(&(objectClass=klass1)(attribute1=tester))'
+			), test_data)
+			self.controller.expectAndReturn(self.search_s_mock(
+				'ou=user,o=schule',
+				ldap.SCOPE_SUBTREE,
+				'(&(objectClass=klass4)(attribute1=tester))'
+			), test_data[-1:])
 		stub = ConnectionStub(search_s=self.search_s_mock)
 		TestModel2.connection = stub
 		TestModel3.connection = stub
@@ -350,20 +350,76 @@ class HasMany(object):
 			'attribute1': 'tester',
 			'attribute2': 'hoho',
 		})
+
+	@pyspec.context(group=1)
+	def a_has_many_relationship(self):
+		self.setup_has_many()
 		self.result1 = self.model3.test_model
 		self.result2 = self.model2.testmodel3s
+
 	@pyspec.spec(group=1)
 	def should_be_correct(self):
 		self.controller.verify()
+
 	@pyspec.spec(group=1)
 	def should_return_the_first_user(self):
 		pyspec.About(self.result1.__class__).should_equal(TestModel2)
 		pyspec.About(self.result1.attribute1).should_equal('someval1')
 		pyspec.About(self.result1.attribute2).should_equal('someval2')
+
 	@pyspec.spec(group=1)
 	def should_return_the_second_users(self):
 		pyspec.About(self.result2.__class__).should_equal(list)
 		pyspec.About(self.result2[0].attribute1).should_equal('someval3')
+
+	@pyspec.spec(group=1)
+	def should_cache_the_single_model(self):
+		pyspec.About(self.model3._test_model).should_equal(
+			self.model3.test_model
+		)
+
+	@pyspec.spec(group=1)
+	def should_cache_the_has_many_model(self):
+		pyspec.About(self.model2._testmodel3s).should_equal(
+			self.model2.testmodel3s
+		)
+
+	@pyspec.context(group=2)
+	def a_reloaded_has_many_relationship(self):
+		self.setup_has_many()
+		self.model3.test_model
+		self.model2.testmodel3s
+		self.model3.reload_cache()
+		self.model2.reload_cache()
+
+	@pyspec.spec(group=2)
+	def should_set_the_caches_of_the_single_attribute_to_none(self):
+		pyspec.About(self.model3._test_model).should_equal(None)
+	
+	@pyspec.spec(group=2)
+	def should_set_the_caches_of_the_plural_attribute_to_none(self):
+		pyspec.About(self.model2._testmodel3s).should_equal(None)
+
+	@pyspec.context(group=3)
+	def a_reloaded_has_many_relationship_which_is_accessed_again(self):
+		self.setup_has_many(2)
+		self.model3.test_model
+		self.model2.testmodel3s
+		self.model3.reload_cache()
+		self.model2.reload_cache()
+		self.model3.test_model
+		self.model2.testmodel3s
+
+	@pyspec.spec(group=3)
+	def should_fill_the_caches_of_the_single_attribute(self):
+		pyspec.About(self.model3._test_model).should_equal(
+			self.model3.test_model
+		)
+	@pyspec.spec(group=3)
+	def should_fill_the_caches_of_the_plural_attribute(self):
+		pyspec.About(self.model2._testmodel3s).should_equal(
+			self.model2.testmodel3s
+		)
 
 if __name__ == '__main__':
 	pyspec.run_test()
