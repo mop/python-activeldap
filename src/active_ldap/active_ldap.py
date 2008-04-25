@@ -1,4 +1,6 @@
 import ldap
+import re
+import sys
 
 class CacheDecorator(object):
 	"""
@@ -26,17 +28,21 @@ class ForeignKey(object):
 	This class represents a foreign key
 	"""
 
-	def __init__(self, other_class, attribute=None):
-		if attribute is None:
-			attribute = other_class.dn_attribute
+	def __init__(self, other_class, my_attr=None, other_attr=None):
+		if other_attr is None:
+			other_attr = other_class.dn_attribute
+		if my_attr is None:
+			my_attr = other_attr
 		self.other_class = other_class
-		self.attribute   = attribute
+		self.my_attr     = my_attr
+		self.other_attr  = other_attr
 
 class NullConnection(object):
 	def search_s(self, *args, **kw): return []
 	def add_s(self, *args, **kw): return []
 	def modify_s(self, *args, **kw): return []
 	def delete_s(self, *args, **kw): return []
+	def modrdn_s(self, *args, **kw): return []
 
 class LdapFetcher(type):
 	"""
@@ -87,9 +93,15 @@ class LdapFetcher(type):
 			if not hasattr(self, singular_name) or \
 				getattr(self, singular_name) is None:
 
-				setattr(self, singular_name, foreign.other_class.find_by_id(
-					getattr(self, foreign.attribute)
-				))
+				id = getattr(self, foreign.my_attr)
+				elements = None
+				try:
+					elements = foreign.other_class.find('(%s=%s)' % (
+						foreign.other_attr, id
+					))[0]
+				except:
+					pass
+				setattr(self, singular_name, elements)
 			return getattr(self, singular_name)
 
 		def fetch_objects(self):
@@ -104,8 +116,8 @@ class LdapFetcher(type):
 
 				setattr(self, plural_name, cls.find(
 					"(%s=%s)" % (
-						foreign.attribute, getattr(self,
-						foreign.attribute)
+						foreign.my_attr, 
+						getattr(self, foreign.other_attr)
 				)))
 			return getattr(self, plural_name)
 		setattr(cls, foreign_name, property(fget=fetch_object))
@@ -206,7 +218,9 @@ class Base(object):
 	def save(self):
 		""" Saves (creates or updates) the User """
 		try:
-			if self.find_by_id(getattr(self, self.dn_attribute)) != None:
+			if hasattr(self, 'dn') or \
+			   self.find_by_id(getattr(self, self.dn_attribute)) != None:
+
 				self.update()
 			else:
 				self.create()
@@ -217,6 +231,16 @@ class Base(object):
 	
 	def update(self):
 		""" Updates the user in the directory """
+		# Modify the DN via modrdn!
+		if hasattr(self, 'dn'):
+			new_attr = getattr(self, self.dn_attribute)
+			self.connection.modrdn_s(self.dn, '%s=%s' % (
+				self.dn_attribute, new_attr
+			), True)
+			# Set the DN-Attribute to the new value!
+			self.dn = re.sub(r'^%s=.*?,' % self.dn_attribute, '%s=%s,' % (
+				self.dn_attribute, new_attr
+			), self.dn)
 		self.connection.modify_s(self._collect_dn(), self._collect_attrs())
 
 	def create(self):

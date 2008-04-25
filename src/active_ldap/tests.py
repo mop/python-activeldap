@@ -52,11 +52,12 @@ class TestModel3(active_ldap.Base):
 
 class ConnectionStub(object):
 	def __init__(self, search_s=None, add_s=None, modify_s=None,
-			     delete_s=None):
+			     delete_s=None, modrdn_s=None):
 		self.search_s = search_s
 		self.add_s = add_s
 		self.modify_s = modify_s
 		self.delete_s = delete_s
+		self.modrdn_s = modrdn_s
 
 class Creation(object):
 	@pyspec.context(group=1)
@@ -261,12 +262,6 @@ class Save(object):
 	@pyspec.context(group=2)
 	def a_model_which_exists(self):
 		self.controller = pymock.Controller()
-		self.search_s_mock = self.controller.mock()
-		self.controller.expectAndReturn(self.search_s_mock(
-			'ou=user,o=schule',
-			ldap.SCOPE_SUBTREE,
-			'(&(objectClass=klass1)(objectClass=klass2)(attribute1=testattr1))'
-		), test_data)
 		self.modify_s_mock = self.controller.mock()
 		self.controller.expectAndReturn(self.modify_s_mock(
 			'attribute1=testattr1,ou=user,o=schule', [
@@ -274,14 +269,20 @@ class Save(object):
 			(ldap.MOD_REPLACE, 'attribute2', 'testattr2'),
 			(ldap.MOD_REPLACE, 'objectClass', [ 'klass1', 'klass2' ]),
 		]), None)
+		self.modrdn_s_mock = self.controller.mock()
+		self.controller.expectAndReturn(self.modrdn_s_mock(
+			'attribute1=testattr1,ou=user,o=schule', 
+			'attribute1=testattr1',
+			True
+		), None)
 		TestModel.connection = ConnectionStub(
-			search_s=self.search_s_mock,
-			modify_s=self.modify_s_mock
+			modify_s=self.modify_s_mock,
+			modrdn_s=self.modrdn_s_mock,
 		)
 		self.model = TestModel({
 			'attribute1': 'testattr1',
 			'attribute2': 'testattr2',
-		})
+		}, 'attribute1=testattr1,ou=user,o=schule')
 		self.controller.replay()
 		self.result = self.model.save()
 		
