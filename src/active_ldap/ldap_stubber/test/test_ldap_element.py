@@ -124,5 +124,13 @@ class OrFilter(unittest.TestCase):
 	def test_should_match_if_one_attr_matches(self):
 		self.assertTrue(self.element.matches('(|(attr1=val1)(attr2=haha))'))
 
+class FilterCombination(unittest.TestCase):
+	def setUp(self):
+		self.element = new_ldap_element()
+	def test_should_match_with_and_and_or(self):
+		self.assertTrue(self.element.matches(
+			'(&(cn=item)(|(attr1=val1)(attr2=haha)))'
+		))
+
 if __name__ == '__main__':
 	unittest.main()

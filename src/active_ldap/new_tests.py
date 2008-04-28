@@ -1,4 +1,4 @@
-from active_ldap import Base, ForeignKey
+from active_ldap import Base, ForeignKey, ManyToManyField
 from ldap_stubber.ldap_stubber import LdapStubber
 import unittest
 import ldap
@@ -33,6 +33,28 @@ class TestUser(Base):
 	scope = ldap.SCOPE_SUBTREE
 	device = ForeignKey(TestPhone, my_attr='deviceID', other_attr='phoneID')
 
+class TestMultipleUser(Base):
+	"""
+	This class represents an user which has multiple phones
+	"""
+	object_classes = (
+		'user',
+		'person',
+	)
+	attributes = {
+		'userID': 'user_id',
+		'deviceID': 'device_id',
+		'name': 'user_name',
+		'mail': 'user_mail',
+	}
+	dn_attribute = 'userID'
+	prefix = 'ou=user,o=schule'
+	scope = ldap.SCOPE_SUBTREE
+	devices = ManyToManyField(
+		TestPhone,
+		my_attr='deviceID',
+		other_attr='phoneID'
+	)
 
 def new_user(attrs={}):
 	default = { 
@@ -44,10 +66,20 @@ def new_user(attrs={}):
 	default.update(attrs)
 	return TestUser(default)
 
+def new_multiple_user(attrs={}):
+	default = { 
+		'userID': 'user1',
+		'name' : 'the_user',
+		'mail' : 'user@example.com',
+		'deviceID' : 'phone1',
+	}
+	default.update(attrs)
+	return TestMultipleUser(default)
+
 def new_phone(attrs={}):
 	default = { 
 		'phoneID': 'phone1',
-		'name' : 'the_phone',
+		'name' :   'the_phone',
 	}
 	default.update(attrs)
 	return TestPhone(default)
@@ -101,7 +133,37 @@ class PropertyLinksUpdateAssignment(unittest.TestCase):
 
 	def test_should_update_the_device(self):
 		self.assertEqual(self.user.deviceID, 'some id2')
-		
+
+class ManyToManyRelationWithTwoUserAndTwoPhones(unittest.TestCase):
+	def setUp(self):
+		self.user1 = new_multiple_user()
+		self.user1.save()
+		self.user2 = new_multiple_user({
+			'userID': 'user2',
+			'deviceID': [
+				'phone1', 'phone2'
+			],
+		})
+		self.user2.save()
+		self.phone1 = new_phone()
+		self.phone1.save()
+		self.phone2 = new_phone({'phoneID': 'phone2'})
+		self.phone2.save()
+	
+	def test_should_return_one_device_for_user1(self):
+		print 'fail'
+		self.assertEqual(len(self.user1.devices), 1)
+		self.assertEqual(self.user1.devices[0].phoneID, 'phone1')
+
+	def test_should_return_two_devices_for_user2(self):
+		self.assertEqual(len(self.user2.devices), 2)
+
+	def test_should_return_two_users_for_device1(self):
+		self.assertEqual(len(self.phone1.testmultipleusers), 2)
+
+	def test_should_return_one_user_for_device2(self):
+		self.assertEqual(len(self.phone2.testmultipleusers), 1)
+		self.assertEqual(self.phone2.testmultipleusers[0].userID, 'user2')
 		
 if __name__ == '__main__':
 	unittest.main()

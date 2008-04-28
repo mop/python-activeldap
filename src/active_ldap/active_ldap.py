@@ -2,11 +2,7 @@ import ldap
 import re
 import sys
 
-class ForeignKey(object):
-	"""
-	This class represents a foreign key
-	"""
-
+class RelationField(object):
 	def __init__(self, other_class, my_attr=None, other_attr=None):
 		if other_attr is None:
 			other_attr = other_class.dn_attribute
@@ -15,6 +11,147 @@ class ForeignKey(object):
 		self.other_class = other_class
 		self.my_attr     = my_attr
 		self.other_attr  = other_attr
+	
+	def create_relation(self, foreign_name, cls, name, bases, dict):
+		"""
+		Creates the relationship
+		
+		foreign_name -- the name of the attribute in the dictionary
+		cls -- the class which called the object
+		name -- the name of the class
+		bases -- the bases of the class
+		dict -- the dictionary of the class
+		"""
+		raise NotImplementedError("Not Implemented")
+		
+
+
+class ForeignKey(RelationField):
+	"""
+	This class represents a foreign key
+	"""
+
+	def __init__(self, *attrs, **kwds):
+		super(ForeignKey, self).__init__(*attrs, **kwds)
+
+	def create_relation(self, foreign_name, cls, name, bases, dct):
+		foreign = self
+		singular_name = "_%s" % foreign_name
+		plural_name = "_%ss" % name.lower()
+		def fetch_object(self):
+			""" 
+			this method fetches the single other FSK-Object and caches in an
+			instance variable.
+			"""
+			if singular_name not in self.has_many_list:
+				self.has_many_list.append(singular_name)
+			if not hasattr(self, singular_name) or \
+				getattr(self, singular_name) is None:
+
+				id = getattr(self, foreign.my_attr)
+				elements = None
+				try:
+					elements = foreign.other_class.find('(%s=%s)' % (
+						foreign.other_attr, id
+					))[0]
+				except:
+					pass
+				setattr(self, singular_name, elements)
+			return getattr(self, singular_name)
+		def fetch_objects(self):
+			""" 
+			this method fetches multiple other FSK-Objects and caches them 
+			in an instance variable.
+			"""
+			if plural_name not in self.has_many_list:
+				self.has_many_list.append(plural_name)
+			if not hasattr(self, plural_name) or \
+				getattr(self, plural_name) is None:
+
+				setattr(self, plural_name, cls.find(
+					"(%s=%s)" % (
+						foreign.my_attr, 
+						getattr(self, foreign.other_attr)
+				)))
+			return getattr(self, plural_name)
+		setattr(cls, foreign_name, property(fget=fetch_object))
+		setattr(
+			foreign.other_class,
+			name.lower() + 's',
+			property(fget=fetch_objects)
+		)
+
+class ManyToManyField(RelationField):
+	"""
+	This class represents a many-to-many relationship
+	"""
+
+	def __init__(self, *attrs, **kwds):
+		super(ManyToManyField, self).__init__(*attrs, **kwds)
+	def create_relation(self, foreign_name, cls, name, bases, dct):
+		"""
+		Creates a many-to-many realtionship for the given class
+		
+		If. we have e.g. a User-class, which defined a relation to a 
+		DeviceClass via the ManyToManyField my_name would be devices and
+		other_name would be users. fetch_my_objects would return all users for
+		the current device and would be set on the device-class.
+		"""
+		my_name = "_%s" % foreign_name
+		other_name = "_%ss" % name.lower()
+		foreign = self
+		def fetch_my_objects(self):
+			"""
+			This method fetches all objects of the class which has defined the
+			ManyToManyField
+			"""
+			if other_name not in self.has_many_list:
+				self.has_many_list.append(other_name)
+			if not hasattr(self, other_name) or \
+				getattr(self, other_name) is None:
+				
+				setattr(self, other_name, cls.find(
+					"(%s=%s)" % (
+						foreign.my_attr,			# e.g. deviceID
+						getattr(self, foreign.other_attr) # e.g. val of phoneID
+				)))
+			return getattr(self, other_name)
+		def fetch_other_objects(self):
+			"""
+			This method fetches all objects of the class which has _not_ 
+			defined the ManyToManyField.
+			"""
+			# if e.g. 'devices' is not in list -> create it
+			if my_name not in self.has_many_list:
+				self.has_many_list.append(my_name)
+			# cache miss
+			if not hasattr(self, my_name) or \
+				getattr(self, my_name) is None:
+				
+				# Fetch the list of IDs
+				ids = getattr(self, foreign.my_attr)
+				if not isinstance(ids, list):
+					ids = [ ids ]
+					
+				# construct the filter expression...
+				# e.g. (phoneID=phone1)(phoneID=phone2)...
+				ids = ''.join([ 
+					"(%s=%s)" % (foreign.other_attr, i) for i in ids 
+				])
+				
+				setattr(self, my_name, foreign.other_class.find(
+					"(|%s)" % ids
+				))
+			return getattr(self, my_name)
+		# on the User class set the fetch_other_objects...
+		setattr(cls, foreign_name, property(fget=fetch_other_objects))
+		# on the Device class set the fetch_my_objects...
+		setattr(
+			foreign.other_class,	         # Device
+			name.lower() + 's',		         # users
+			property(fget=fetch_my_objects)  # property
+		)
+
 
 class NullConnection(object):
 	def search_s(self, *args, **kw): return []
@@ -33,9 +170,16 @@ class LdapFetcher(type):
 			cls.connection = NullConnection()
 
 		cls._create_has_many_list(name, bases, dct)
-		foreigns = filter(lambda key: isinstance(dct[key], ForeignKey), dct)
+		foreigns = filter(lambda key: isinstance(dct[key], RelationField), dct)
 		for foreign_name in foreigns:
-			cls._create_has_many(foreign_name, name, bases, dct)
+			dct[foreign_name].create_relation(
+				foreign_name,
+				cls,
+				name,
+				bases,
+				dct
+			)
+			#cls._create_has_many(foreign_name, name, bases, dct)
 		if hasattr(cls, 'attributes') and isinstance(cls.attributes, dict):
 			cls._create_property_links()
 
@@ -80,54 +224,6 @@ class LdapFetcher(type):
 			for i in self.has_many_list:
 				setattr(self, i, None)
 		setattr(cls, 'reload_cache', reload_cache)
-		
-	def _create_has_many(cls, foreign_name, name, bases, dct):
-		foreign = dct[foreign_name]
-		singular_name = "_%s" % foreign_name
-		plural_name = "_%ss" % name.lower()
-		def fetch_object(self):
-			""" 
-			this method fetches the single other FSK-Object and caches in an
-			instance variable.
-			"""
-			if singular_name not in self.has_many_list:
-				self.has_many_list.append(singular_name)
-			if not hasattr(self, singular_name) or \
-				getattr(self, singular_name) is None:
-
-				id = getattr(self, foreign.my_attr)
-				elements = None
-				try:
-					elements = foreign.other_class.find('(%s=%s)' % (
-						foreign.other_attr, id
-					))[0]
-				except:
-					pass
-				setattr(self, singular_name, elements)
-			return getattr(self, singular_name)
-
-		def fetch_objects(self):
-			""" 
-			this method fetches multiple other FSK-Objects and caches them 
-			in an instance variable.
-			"""
-			if plural_name not in self.has_many_list:
-				self.has_many_list.append(plural_name)
-			if not hasattr(self, plural_name) or \
-				getattr(self, plural_name) is None:
-
-				setattr(self, plural_name, cls.find(
-					"(%s=%s)" % (
-						foreign.my_attr, 
-						getattr(self, foreign.other_attr)
-				)))
-			return getattr(self, plural_name)
-		setattr(cls, foreign_name, property(fget=fetch_object))
-		setattr(
-			foreign.other_class,
-			name.lower() + 's',
-			property(fget=fetch_objects)
-		)
 
 class Base(object):
 	"""
@@ -329,6 +425,30 @@ class Base(object):
 			cls.prefix
 		)
 
+	def _encode_val(self, val):
+		"""
+		Encodes the given value for LDAP
+		
+		val -- the value which should be encoded
+		"""
+		if isinstance(val, unicode):
+			return val.encode('utf-8')
+		if isinstance(val, bool):
+			trans_table = { True: 'TRUE', False: 'FALSE' }
+			return trans_table[val]
+		if isinstance(val, list):
+			return [ self._encode_val(i) for i in val ]
+		return val
+	
+	def _encoded_attr(self, key):
+		"""
+		Encodes the given attribute in utf-8
+		
+		key -- the key (the name) of the attribute which should be encoded
+		"""
+		attr = getattr(self, key)
+		return self._encode_val(attr)
+
 	def _collect_attrs(self):
 		"""
 		Returns the attributes in the form:
@@ -339,7 +459,7 @@ class Base(object):
 			attrs.append( (
 				ldap.MOD_REPLACE,
 				key,
-				getattr(self, key).encode('utf-8')
+				self._encoded_attr(key)
 			) )
 		attrs.append( (
 			ldap.MOD_REPLACE,

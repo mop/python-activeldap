@@ -1,6 +1,23 @@
 import ldap
 import re
 
+# Parses ()-expressions
+def parse_expression(string):
+	stack = 0
+	lists = []
+	start = -1
+	for i, elem in enumerate(string):
+		if elem == '(' and stack == 0:
+			start = i
+		if elem == ')' and stack == 1:
+			lists.append(string[start:i+1])
+		if elem == '(':
+			stack = stack + 1
+		if elem == ')':
+			stack = stack - 1
+	return lists
+
+
 class LdapElement(object):
 	"""
 	This class represents an element within the directory
@@ -124,7 +141,7 @@ class LdapElement(object):
 		op -- the operator
 		match -- the filter expression
 		"""
-		nodes = self.nodes.findall(match)
+		nodes = parse_expression(match)
 		rv = self._init_for_op(op)
 		for node in nodes:
 			rv = self._combine(op, rv, self.matches(node))
