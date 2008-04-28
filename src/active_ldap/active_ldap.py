@@ -2,27 +2,6 @@ import ldap
 import re
 import sys
 
-class CacheDecorator(object):
-	"""
-	This class caches the result of a function
-	"""
-
-	def __init__(self, *args, **kwds):
-		self._result = None
-	
-	def _cached_fun(self, *args, **kwds):
-		if self._result is not None:
-			return self._result
-		self._result = self._fun(*args, **kwds)
-		return self._result
-	
-	def reload(self):
-		self._result = None
-	
-	def __call__(self, fun):
-		self._fun = fun
-		return self._cached_fun
-
 class ForeignKey(object):
 	"""
 	This class represents a foreign key
@@ -57,8 +36,31 @@ class LdapFetcher(type):
 		foreigns = filter(lambda key: isinstance(dct[key], ForeignKey), dct)
 		for foreign_name in foreigns:
 			cls._create_has_many(foreign_name, name, bases, dct)
+		if hasattr(cls, 'attributes') and isinstance(cls.attributes, dict):
+			cls._create_property_links()
 
 		super(LdapFetcher, cls).__init__(name, bases, dct)
+	
+	def _create_property_links(cls):
+		"""
+		Creates the property links for the given class
+		"""
+		for key in cls.attributes:
+			cls._create_property(key, cls.attributes[key])
+	
+	def _create_property(cls, key, link):
+		"""
+		Creates the property link for the given key and link.
+		
+		key -- The name of the original ldap attribute.
+		link -- The link-name of the property which should be created.
+		
+		"""
+		def set_it(self, val):
+			setattr(self, key, val)
+		def get_it(self):
+			return getattr(self, key)
+		setattr(cls, link, property(get_it, set_it))
 	
 	def _create_has_many_list(cls, name, bases, dct):
 		def get_has_many_list(self):
@@ -142,11 +144,44 @@ class Base(object):
 		for key in self.attributes:
 			setattr(self, key, '')
 		for key in attrs.keys():
-			if key not in self.attributes: continue
-			if attrs[key].__class__ == list:
-				setattr(self, key, attrs[key][0])
-			else:
-				setattr(self, key, attrs[key])
+			val = self._get_val_from_dict(key, attrs)
+			self._set_key(key, val)
+	
+	def _get_val_from_dict(self, key, dict):
+		"""
+		Returns the value of the key in the given dictionary
+
+		key -- is the key of the dictionary
+		dict -- is the dictionary whose value should be returned
+		"""
+		if dict[key].__class__ == list and len(dict[key]) == 1:
+			return dict[key][0]
+		else:
+			return dict[key]
+
+	def _is_key_in_attributes(self, key):
+		"""
+		Returns true if the given key is in the attributes list or dictionary.
+		
+		key -- the name of the attribute.
+		"""
+		rv = key in self.attributes
+		if rv:
+			return rv
+		if isinstance(self.attributes, dict):
+			return key in self.attributes.values()
+		return rv
+
+	def _set_key(self, key, val):
+		"""
+		Assigns the given value to the given key
+		
+		key -- The attribute name which should be set
+		val -- The value of the attribute
+		"""
+		if not self._is_key_in_attributes(key):
+			return
+		setattr(self, key, val)
 		
 	@classmethod
 	def establish_connection(cls, config):
@@ -315,74 +350,28 @@ class Base(object):
 			return self.after_collect_attributes(attrs)
 		return attrs
 		
-#class Device(Base):
-#	"""
-#	This class represents a Device
-#	"""
-#	object_classes = ( 
-#		'voipDevice',
-#	)
-#	attributes = (
-#		'voipDeviceID',
-#		'voipPhoneNumber',
-#		'voipDeviceMac',
-#		'voipDeviceTyp',
-#		'voipDeviceIP',
-#	)
-#	dn_attribute = 'voipDeviceID'
-#	prefix = 'ou=voip,o=schule'
-#	scope = ( ldap.SCOPE_SUBTREE )
-#
-#
-#class User(Base):
-#	"""
-#	This class represents a LdapUser
-#	"""
-#	object_classes = ( 
-#		'voipUser',
-#		'User',
-#		'organizationalPerson' 
-#	)
-#	attributes = (
-#		'sn',
-#		'telephoneNumber',
-#		'uid',
-#		'mail',
-#		'voipDeviceID',
-#		'givenName',
-#		'cn'
-#	)
-#	dn_attribute = 'uid'
-#	prefix = 'ou=user,o=schule'
-#	scope = ( ldap.SCOPE_SUBTREE )
-#	device = ForeignKey(Device, 'voipDeviceID')
-#
-#	def after_collect_attributes(self, attrs):
-#		number = filter(lambda i: i[1] == 'telephoneNumber', attrs)[0][2]
-#		attrs.append((ldap.MOD_REPLACE, 'voipPhoneNumber', number))
-#		return attrs
-
 if __name__ == '__main__':
-	u = User({
-		'sn': 'roflhaha1',
-		'telephoneNumber': '123345',
-		'uid': 'roflhaha12',
-		'mail': 'rofl@haha.de',
-		'voipDeviceID': 'DEVBL49_1',
-		'givenName': 'roflhaha1',
-		'cn': 'roflhaha1'
-	})
-	LDAP_CONFIG = {
-		'uri': 			 'ldap://192.168.49.50',
-		'bind_dn': 		 'cn=admin,o=schule',
-		'bind_password': 'netwix',
-		'cert_path': 	 'certs/groupwise.cert',
-	}
-	Base.establish_connection(LDAP_CONFIG)
-	dev = User.find_all()[0].device
-	print dev.users
-	print dev.users
-	print dev.users
-	print User.find_all()[0].device.users
-	print User.find_all()[0].device.users
-	print len(Device.find_all()[5].users)
+#	u = User({
+#		'sn': 'roflhaha1',
+#		'telephoneNumber': '123345',
+#		'uid': 'roflhaha12',
+#		'mail': 'rofl@haha.de',
+#		'voipDeviceID': 'DEVBL49_1',
+#		'givenName': 'roflhaha1',
+#		'cn': 'roflhaha1'
+#	})
+#	LDAP_CONFIG = {
+#		'uri': 			 'ldap://192.168.49.50',
+#		'bind_dn': 		 'cn=admin,o=schule',
+#		'bind_password': 'netwix',
+#		'cert_path': 	 'certs/groupwise.cert',
+#	}
+#	Base.establish_connection(LDAP_CONFIG)
+#	dev = User.find_all()[0].device
+#	print dev.users
+#	print dev.users
+#	print dev.users
+#	print User.find_all()[0].device.users
+#	print User.find_all()[0].device.users
+#	print len(Device.find_all()[5].users)
+	pass

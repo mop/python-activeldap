@@ -22,12 +22,12 @@ class TestUser(Base):
 		'user',
 		'person',
 	)
-	attributes = (
-		'userID',
-		'deviceID',
-		'name',
-		'mail',
-	)
+	attributes = {
+		'userID': 'user_id',
+		'deviceID': 'device_id',
+		'name': 'user_name',
+		'mail': 'user_mail',
+	}
 	dn_attribute = 'userID'
 	prefix = 'ou=user,o=schule'
 	scope = ldap.SCOPE_SUBTREE
@@ -70,6 +70,38 @@ class Relationship(unittest.TestCase):
 
 	def test_should_have_one_device2(self):
 		self.assertEqual(self.user2.device.phoneID, self.phone.phoneID)
+
+class PropertyLinksAccess(unittest.TestCase):
+	def setUp(self):
+		self.user = new_user()
+	def test_should_create_the_correct_links(self):
+		self.assertEqual(self.user.user_id, 'user1')
+		self.assertEqual(self.user.device_id, 'phone1')
+		self.assertEqual(self.user.user_name, 'the_user')
+
+class PropertyLinksUpdateContructor(unittest.TestCase):
+	def setUp(self):
+		self.user = TestUser({
+			'user_id':   'user2',
+			'device_id': 'phone1',
+		})
+
+	def test_should_update_the_normal_links(self):
+		self.assertEqual(self.user.userID, 'user2')
+		self.assertEqual(self.user.deviceID, 'phone1')
+
+class PropertyLinksUpdateAssignment(unittest.TestCase):
+	def setUp(self):
+		self.user = new_user()
+		self.user.user_id = 'some id'
+		self.user.device_id = 'some id2'
+
+	def test_should_update_the_user(self):
+		self.assertEqual(self.user.userID, 'some id')
+
+	def test_should_update_the_device(self):
+		self.assertEqual(self.user.deviceID, 'some id2')
+		
 		
 if __name__ == '__main__':
 	unittest.main()
