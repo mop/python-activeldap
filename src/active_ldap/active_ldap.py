@@ -24,8 +24,6 @@ class RelationField(object):
 		"""
 		raise NotImplementedError("Not Implemented")
 		
-
-
 class ForeignKey(RelationField):
 	"""
 	This class represents a foreign key
@@ -147,9 +145,9 @@ class ManyToManyField(RelationField):
 		setattr(cls, foreign_name, property(fget=fetch_other_objects))
 		# on the Device class set the fetch_my_objects...
 		setattr(
-			foreign.other_class,	         # Device
-			name.lower() + 's',		         # users
-			property(fget=fetch_my_objects)  # property
+			foreign.other_class,	         # eg. Device
+			name.lower() + 's',		         # eg. users
+			property(fget=fetch_my_objects)  # eg. property
 		)
 
 
