@@ -1,8 +1,21 @@
+"""
+This module includes the Base class from which the other classes must be
+derived.
+"""
 import ldap
 import re
 import sys
 
 class RelationField(object):
+	"""
+	This is a base-class for relationships.
+	It takes the other_class and two attributes (the local one, and the one on
+	the foreign class) as parameter.
+
+	other_class -- The other class of the relationship.
+	my_attr -- the name of the local attribute.
+	other_attr -- The name of the attribute on the other class.
+	"""
 	def __init__(self, other_class, my_attr=None, other_attr=None):
 		if other_attr is None:
 			other_attr = other_class.dn_attribute
@@ -26,13 +39,16 @@ class RelationField(object):
 		
 class ForeignKey(RelationField):
 	"""
-	This class represents a foreign key
+	This class is used to specify a has-many relationship.
 	"""
 
 	def __init__(self, *attrs, **kwds):
 		super(ForeignKey, self).__init__(*attrs, **kwds)
 
 	def create_relation(self, foreign_name, cls, name, bases, dct):
+		"""
+		Creates the has-many relationship.
+		"""
 		foreign = self
 		singular_name = "_%s" % foreign_name
 		plural_name = "_%ss" % name.lower()
@@ -81,7 +97,7 @@ class ForeignKey(RelationField):
 
 class ManyToManyField(RelationField):
 	"""
-	This class represents a many-to-many relationship
+	This class represents a many-to-many relationship.
 	"""
 
 	def __init__(self, *attrs, **kwds):
@@ -152,6 +168,10 @@ class ManyToManyField(RelationField):
 
 
 class NullConnection(object):
+	"""
+	If no connection is specified this connection object is actually used in
+	order to not block in unit-tests, etc.
+	"""
 	def search_s(self, *args, **kw): return []
 	def add_s(self, *args, **kw): return []
 	def modify_s(self, *args, **kw): return []
@@ -160,10 +180,18 @@ class NullConnection(object):
 
 class LdapFetcher(type):
 	"""
-	This class autogenerates the ldap fields
+	This class autogenerates the ldap fields. It dynamically searches for
+	Relation-instances on the class and creates the appropriate relationship.
+	Moreover this class is responsible for creation the mapped attributes on 
+	the class when specified.
 	"""
 
 	def __init__(cls, name, bases, dct):
+		"""
+		Dynamically searches for Relation-instances on the class and creates 
+		the appropriate relationship. Moreover it generates the properties for
+		the links.
+		"""
 		if not hasattr(cls, 'connection'):
 			cls.connection = NullConnection()
 
@@ -205,6 +233,10 @@ class LdapFetcher(type):
 		setattr(cls, link, property(get_it, set_it))
 	
 	def _create_has_many_list(cls, name, bases, dct):
+		"""
+		Creates the has_many_list property, which contains all names of cached
+		properties.
+		"""
 		def get_has_many_list(self):
 			if not hasattr(self, '_has_many_list'):
 				self._has_many_list = []
@@ -218,14 +250,20 @@ class LdapFetcher(type):
 		)
 
 		def reload_cache(self):
-			""" reloads the cached has_many-attributes """
+			""" reloads the cached has_many and habtm-attributes """
 			for i in self.has_many_list:
 				setattr(self, i, None)
 		setattr(cls, 'reload_cache', reload_cache)
 
 class Base(object):
 	"""
-	This class represents the base of ActiveLdap
+	This class represents the base of ActiveLdap. Concrete classes must derive
+	from this class and specify the following things:
+		* attributes: Might be a list or a dictionary of attributes which 
+					  should be fetched from the directory
+		* dn_attribute: The dn_attribute which should be used by the class
+		* scope: the scope of the search-operaions. e.g. ldap.SCOPE_SUBTREE
+		* object_classes: the ldap-objectClasses of the class.
 	"""
 	__metaclass__ = LdapFetcher
 
@@ -280,11 +318,25 @@ class Base(object):
 	@classmethod
 	def establish_connection(cls, config):
 		"""
-		Establishes the connection to ldap
+		Establishes the connection to ldap.
+		
+		config -- is a dictionary which might contain the following attributes:
+			* uri: the URI to the server
+			* bind_dn: the bind-dn for the admin-user
+			* bind_password: the passwort for the bind-user
+			* cert_path: the certificate for the server
+			* timeout: the amout of time which should be waited before raising
+					   an timeout-exception
 		"""
 		cls.config = config
 		try:
+			if 'timeout' in cls.config:
+				ldap.set_option(
+					ldap.OPT_NETWORK_TIMEOUT,
+					cls.config['timeout']
+				)
 			cls.connection = ldap.initialize(cls.config['uri'])
+
 			if cls.config['uri'].startswith('ldaps'):
 				cls._init_certs()
 				cls.connection.start_tls_s()
@@ -345,7 +397,7 @@ class Base(object):
 
 	# ---- creation methods -----
 	def save(self):
-		""" Saves (creates or updates) the User """
+		""" Saves (creates or updates) the item """
 		try:
 			if hasattr(self, 'dn') or \
 			   self.find_by_id(getattr(self, self.dn_attribute)) != None:
@@ -359,7 +411,7 @@ class Base(object):
 		return True
 	
 	def update(self):
-		""" Updates the user in the directory """
+		""" Updates the item in the directory """
 		# Modify the DN via modrdn!
 		if hasattr(self, 'dn'):
 			new_attr = getattr(self, self.dn_attribute)
@@ -373,14 +425,14 @@ class Base(object):
 		self.connection.modify_s(self._collect_dn(), self._collect_attrs())
 
 	def create(self):
-		""" Creates the user in the directory """
+		""" Creates the item in the directory """
 		attrs = self._collect_attrs()
 		attrs = [ ( i[1], i[2] ) for i in attrs ]
 		self.connection.add_s(self._collect_dn(), attrs)
 
 	def delete(self):
 		"""
-		Deletes the object from the directory
+		Deletes the item from the directory
 		"""
 		try:
 			dn = self._collect_dn()

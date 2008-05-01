@@ -151,7 +151,6 @@ class ManyToManyRelationWithTwoUserAndTwoPhones(unittest.TestCase):
 		self.phone2.save()
 	
 	def test_should_return_one_device_for_user1(self):
-		print 'fail'
 		self.assertEqual(len(self.user1.devices), 1)
 		self.assertEqual(self.user1.devices[0].phoneID, 'phone1')
 
