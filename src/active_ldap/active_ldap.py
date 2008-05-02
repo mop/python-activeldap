@@ -4,7 +4,7 @@ derived.
 """
 import ldap
 import re
-import sys
+import os
 
 class RelationField(object):
 	"""
@@ -25,7 +25,7 @@ class RelationField(object):
 		self.my_attr     = my_attr
 		self.other_attr  = other_attr
 	
-	def create_relation(self, foreign_name, cls, name, bases, dict):
+	def create_relation(self, foreign_name, cls, name, bases, dct):
 		"""
 		Creates the relationship
 		
@@ -33,7 +33,7 @@ class RelationField(object):
 		cls -- the class which called the object
 		name -- the name of the class
 		bases -- the bases of the class
-		dict -- the dictionary of the class
+		dct -- the dictionary of the class
 		"""
 		raise NotImplementedError("Not Implemented")
 		
@@ -41,9 +41,6 @@ class ForeignKey(RelationField):
 	"""
 	This class is used to specify a has-many relationship.
 	"""
-
-	def __init__(self, *attrs, **kwds):
-		super(ForeignKey, self).__init__(*attrs, **kwds)
 
 	def create_relation(self, foreign_name, cls, name, bases, dct):
 		"""
@@ -62,14 +59,14 @@ class ForeignKey(RelationField):
 			if not hasattr(self, singular_name) or \
 				getattr(self, singular_name) is None:
 
-				id = getattr(self, foreign.my_attr)
+				my_id = getattr(self, foreign.my_attr)
 				elements = None
 				try:
 					elements = foreign.other_class.find('(%s=%s)' % (
-						foreign.other_attr, id
+						foreign.other_attr, my_id
 					))[0]
-				except:
-					pass
+				except ldap.LDAPError:
+					elements = None
 				setattr(self, singular_name, elements)
 			return getattr(self, singular_name)
 		def fetch_objects(self):
@@ -100,8 +97,6 @@ class ManyToManyField(RelationField):
 	This class represents a many-to-many relationship.
 	"""
 
-	def __init__(self, *attrs, **kwds):
-		super(ManyToManyField, self).__init__(*attrs, **kwds)
 	def create_relation(self, foreign_name, cls, name, bases, dct):
 		"""
 		Creates a many-to-many realtionship for the given class
@@ -172,11 +167,31 @@ class NullConnection(object):
 	If no connection is specified this connection object is actually used in
 	order to not block in unit-tests, etc.
 	"""
-	def search_s(self, *args, **kw): return []
-	def add_s(self, *args, **kw): return []
-	def modify_s(self, *args, **kw): return []
-	def delete_s(self, *args, **kw): return []
-	def modrdn_s(self, *args, **kw): return []
+	def search_s(self, *args, **kwds): 
+		"""
+		Searches the directory
+		"""
+		return []
+	def add_s(self, *args, **kwds): 
+		"""
+		Adds an element to the directory
+		"""
+		return []
+	def modify_s(self, *args, **kwds): 
+		"""
+		Modifies an element in the directory
+		"""
+		return []
+	def delete_s(self, *args, **kwds): 
+		"""
+		Deletes an entry in the directory
+		"""
+		return []
+	def modrdn_s(self, *args, **kwds): 
+		"""
+		Modifies the DN of an entry in the directory
+		"""
+		return []
 
 class LdapFetcher(type):
 	"""
@@ -205,7 +220,6 @@ class LdapFetcher(type):
 				bases,
 				dct
 			)
-			#cls._create_has_many(foreign_name, name, bases, dct)
 		if hasattr(cls, 'attributes') and isinstance(cls.attributes, dict):
 			cls._create_property_links()
 
@@ -267,29 +281,66 @@ class Base(object):
 	"""
 	__metaclass__ = LdapFetcher
 
-	def __init__(self, attrs={}, dn=None):
+	object_classes = ('inetOrgUser', )
+	"""
+	Specifies the object-classes of the record type. This attribute should be
+	overwritten by child-classes.
+	"""
+
+	attributes = {
+		'uid': 'id',
+		'givenName': 'name',
+		'telephoneNumber': 'number',
+	}
+	"""
+	This dictionary specifies which attributes should be fetched from ldap. 
+	The values of the dictionary are names of properties which are created as
+	links of the real values. This was made in order to abstract from the
+	ldap-schema.
+	This should be overwritten.
+	"""
+
+	dn_attribute = 'uid'
+	"""
+	Specifies the DN-Attribute of the class.
+	This should be overwritten.
+	"""
+
+	scope = ldap.SCOPE_SUBTREE
+	"""
+	Specifies the scope in which the entries should be searched. This can be
+	overwritten by child-classes.
+	"""
+
+	prefix = 'ou=user,o=tree'
+	"""
+	Specifies the prefix of the class.
+	This should be overwritten by child-classes.
+	"""
+
+	def __init__(self, attrs={}, my_dn=None):
 		"""
 		Initializes the object with the global connection...
 		"""
-		if dn:
-			self.dn = dn
+		if my_dn:
+			self.dn = my_dn
 		for key in self.attributes:
 			setattr(self, key, '')
 		for key in attrs.keys():
 			val = self._get_val_from_dict(key, attrs)
 			self._set_key(key, val)
 	
-	def _get_val_from_dict(self, key, dict):
+	def _get_val_from_dict(self, key, dct):
 		"""
 		Returns the value of the key in the given dictionary
 
 		key -- is the key of the dictionary
-		dict -- is the dictionary whose value should be returned
+		dct -- is the dictionary whose value should be returned
 		"""
-		if dict[key].__class__ == list and len(dict[key]) == 1:
-			return dict[key][0]
+		if dct[key].__class__ == list and len(dct[key]) == 1:
+			return dct[key][0]
 		else:
-			return dict[key]
+			return dct[key]
 
 	def _is_key_in_attributes(self, key):
 		"""
@@ -297,12 +348,12 @@ class Base(object):
 		
 		key -- the name of the attribute.
 		"""
-		rv = key in self.attributes
-		if rv:
-			return rv
+		result = key in self.attributes
+		if result:
+			return result
 		if isinstance(self.attributes, dict):
 			return key in self.attributes.values()
-		return rv
+		return result
 
 	def _set_key(self, key, val):
 		"""
@@ -345,9 +396,10 @@ class Base(object):
 				cls.config['bind_password']
 			)
 			return cls.connection
-		except:
+		except ldap.LDAPError, ldap.TIMEOUT:
 			del cls.connection
 	
+	@classmethod
 	def _init_certs(cls):
 		""" 
 		Initializes the certs 
@@ -355,22 +407,23 @@ class Base(object):
 		if cls.config['cert_path'] == None:
 			return
 		cert = os.path.abspath(cls.config['cert_path'])
-		ldap.set_option(ldap.OPT_X_TLS_CERTFILE, cls.config['cert_path'])
+		ldap.set_option(ldap.OPT_X_TLS_CERTFILE, cert)
 
 	@classmethod
-	def find_by_id(cls, id):
+	def find_by_id(cls, elem_id):
 		"""Finds the item by id"""
-		filter = "(&%s(%s=%s))" % (
+		filter_expression = "(&%s(%s=%s))" % (
 			cls._classes_string(),
 			cls.dn_attribute,
-			id
+			elem_id
 		)
 		results = cls.connection.search_s(
 			cls.prefix,
 			cls.scope,
-			filter
+			filter_expression
 		)
-		if len(results) == 0: return None
+		if len(results) == 0:
+			return None
 		return cls(results[0][1], results[0][0])
 
 	@classmethod
@@ -386,12 +439,12 @@ class Base(object):
 		return map(lambda (id, attrs): cls(attrs, id), results)
 	
 	@classmethod
-	def find(cls, filter):
+	def find(cls, filter_expression):
 		"""Finds all which matches the given LDAP-filter"""
 		results = cls.connection.search_s(
 			cls.prefix,
 			cls.scope,
-			'(&%s%s)' % (cls._classes_string(), filter)
+			'(&%s%s)' % (cls._classes_string(), filter_expression)
 		)
 		return map(lambda (id, attrs): cls(attrs, id), results)
 
@@ -405,8 +458,8 @@ class Base(object):
 				self.update()
 			else:
 				self.create()
-		except Exception, e:
-			print e
+		except ldap.LDAPError, error:
+			print error
 			return False
 		return True
 	
@@ -435,19 +488,19 @@ class Base(object):
 		Deletes the item from the directory
 		"""
 		try:
-			dn = self._collect_dn()
-			self.connection.delete_s(dn)
+			my_dn = self._collect_dn()
+			self.connection.delete_s(my_dn)
 			return True
-		except:
+		except ldap.LDAPError:
 			return False
 	
 	@classmethod
-	def delete_by_id(cls, id):
+	def delete_by_id(cls, my_dn):
 		""" Deletes an entry by it's ID """
 		try:
-			cls.connection.delete_s(cls._construct_dn(id))
+			cls.connection.delete_s(cls._construct_dn(my_dn))
 			return True
-		except:
+		except ldap.LDAPError:
 			return False
 		
 		
@@ -516,9 +569,17 @@ class Base(object):
 			'objectClass',
 			list(self.object_classes)
 		) )
-		if hasattr(self, 'after_collect_attributes'):
-			return self.after_collect_attributes(attrs)
+		return self.after_collect_attributes(attrs)
+
+	def after_collect_attributes(self, attrs):
+		"""
+		Overwrite this method in order to manipulate the attributes after
+		sending it to the ldap-library.
+		
+		attrs -- a list of attribute tuples
+		"""
 		return attrs
+		
 		
 if __name__ == '__main__':
 #	u = User({
