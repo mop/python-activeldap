@@ -23,10 +23,13 @@ class RelationField(object):
 		if my_attr is None:
 			my_attr = other_attr
 		self.other_class = other_class
+		# Unfortunately we can't populate this attribute since the called-class
+		# should not exist on the timepoint of creating this class :(
+		self.my_class	 = None
 		self.my_attr     = my_attr
 		self.other_attr  = other_attr
 	
-	def create_relation(self, foreign_name, cls, name, bases, dct):
+	def create_relation(self, foreign_name, cls):
 		"""
 		Creates the relationship
 		
@@ -37,19 +40,41 @@ class RelationField(object):
 		dct -- the dictionary of the class
 		"""
 		raise NotImplementedError("Not Implemented")
+
+def referenced_object_deleted(self, obj):
+	"""
+	This method is called from the referenced class if an instance of it
+	was deleted
+	
+	obj -- the object which will be deleted
+	"""
+	name = "%ss" % self.my_class.__name__.lower()
+	deleted_id = getattr(obj, self.other_attr)
+	items = getattr(obj, name)
+	for item in items:
+		attr = getattr(item, self.my_attr)
+		if not isinstance(attr, list):
+			attr = [ attr ]
+		# remove the id
+		attr.remove(deleted_id)
+		setattr(item, self.my_attr, attr)
+		item.save()
 		
 class ForeignKey(RelationField):
 	"""
 	This class is used to specify a has-many relationship.
 	"""
 
-	def create_relation(self, foreign_name, cls, name, bases, dct):
+	def _create_fetch_single_object(self, foreign_name):
 		"""
-		Creates the has-many relationship.
+		Returns a function for fetching the single objects on the my_class (the
+		class with the foreign-key).
+
+		foreign_name -- is the name of the ForeignKey instance in the
+		dictionary of the class which defined it.
 		"""
 		foreign = self
 		singular_name = "_%s" % foreign_name
-		plural_name = "_%ss" % name.lower()
 		def fetch_object(self):
 			""" 
 			this method fetches the single other FSK-Object and caches in an
@@ -70,6 +95,15 @@ class ForeignKey(RelationField):
 					elements = None
 				setattr(self, singular_name, elements)
 			return getattr(self, singular_name)
+		return fetch_object
+
+	def _create_fetch_multiple_objects(self):
+		"""
+		Creates the multiple-fetch-property on the referenced class.
+		"""
+		cls = self.my_class
+		plural_name = "_%ss" % cls.__name__.lower()
+		foreign = self
 		def fetch_objects(self):
 			""" 
 			this method fetches multiple other FSK-Objects and caches them 
@@ -86,11 +120,25 @@ class ForeignKey(RelationField):
 						getattr(self, foreign.other_attr)
 				)))
 			return getattr(self, plural_name)
-		setattr(cls, foreign_name, property(fget=fetch_object))
+		return fetch_objects
+
+	def create_relation(self, foreign_name, cls):
+		"""
+		Creates the has-many relationship.
+		"""
+		self.other_class.events.register(
+			'before_delete', 
+			lambda event, instance: referenced_object_deleted(self, instance)
+		)
+		self.my_class = cls
+
+		setattr(cls, foreign_name,
+				property(self._create_fetch_single_object(foreign_name))
+		)
 		setattr(
-			foreign.other_class,
-			name.lower() + 's',
-			property(fget=fetch_objects)
+			self.other_class,
+			cls.__name__.lower() + 's',
+			property(self._create_fetch_multiple_objects())
 		)
 
 class ManyToManyField(RelationField):
@@ -98,17 +146,13 @@ class ManyToManyField(RelationField):
 	This class represents a many-to-many relationship.
 	"""
 
-	def create_relation(self, foreign_name, cls, name, bases, dct):
+	def _create_fetch_my_objects(self):
 		"""
-		Creates a many-to-many realtionship for the given class
-		
-		If. we have e.g. a User-class, which defined a relation to a 
-		DeviceClass via the ManyToManyField my_name would be devices and
-		other_name would be users. fetch_my_objects would return all users for
-		the current device and would be set on the device-class.
+		Returns a function for fetching all objects of the class which has
+		defined the ManyToManyField
 		"""
-		my_name = "_%s" % foreign_name
-		other_name = "_%ss" % name.lower()
+		cls = self.my_class
+		other_name = "_%ss" % cls.__name__.lower()
 		foreign = self
 		def fetch_my_objects(self):
 			"""
@@ -126,6 +170,15 @@ class ManyToManyField(RelationField):
 						getattr(self, foreign.other_attr) # e.g. val of phoneID
 				)))
 			return getattr(self, other_name)
+		return fetch_my_objects
+
+	def _create_fetch_other_objects(self, foreign_name):
+		"""
+		Returns a function for fetching all objects of the class which has
+		_not_ defined the ManyToManyField.
+		"""
+		my_name = "_%s" % foreign_name
+		foreign = self
 		def fetch_other_objects(self):
 			"""
 			This method fetches all objects of the class which has _not_ 
@@ -153,13 +206,35 @@ class ManyToManyField(RelationField):
 					"(|%s)" % ids
 				))
 			return getattr(self, my_name)
+		return fetch_other_objects
+
+
+	def create_relation(self, foreign_name, cls):
+		"""
+		Creates a many-to-many realtionship for the given class
+		
+		If. we have e.g. a User-class, which defined a relation to a 
+		DeviceClass via the ManyToManyField my_name would be devices and
+		other_name would be users. fetch_my_objects would return all users for
+		the current device and would be set on the device-class.
+		"""
+		self.other_class.events.register(
+			'before_delete', 
+			lambda event, instance: referenced_object_deleted(self, instance)
+		)
+		self.my_class = cls
+
 		# on the User class set the fetch_other_objects...
-		setattr(cls, foreign_name, property(fget=fetch_other_objects))
+		setattr(
+			cls,
+			foreign_name,
+			property(self._create_fetch_other_objects(foreign_name))
+		)
 		# on the Device class set the fetch_my_objects...
 		setattr(
-			foreign.other_class,	         # eg. Device
-			name.lower() + 's',		         # eg. users
-			property(fget=fetch_my_objects)  # eg. property
+			self.other_class,	         			    # eg. Device
+			self.my_class.__name__.lower() + 's',       # eg. users
+			property(self._create_fetch_my_objects())	# eg. property
 		)
 
 
@@ -214,15 +289,12 @@ class LdapFetcher(Sendable):
 		if not hasattr(cls, 'connection'):
 			cls.connection = NullConnection()
 
-		cls._create_has_many_list(name, bases, dct)
+		cls._create_has_many_list()
 		foreigns = filter(lambda key: isinstance(dct[key], RelationField), dct)
 		for foreign_name in foreigns:
 			dct[foreign_name].create_relation(
 				foreign_name,
 				cls,
-				name,
-				bases,
-				dct
 			)
 		if hasattr(cls, 'attributes') and isinstance(cls.attributes, dict):
 			cls._create_property_links()
@@ -243,22 +315,35 @@ class LdapFetcher(Sendable):
 		
 		"""
 		def set_it(self, val):
+			"""
+			Creates the set-property for the given key
+			"""
 			setattr(self, key, val)
 		def get_it(self):
+			"""
+			Creates the get-property for the given key
+			"""
 			return getattr(self, key)
 		setattr(cls, link, property(get_it, set_it))
 	
-	def _create_has_many_list(cls, name, bases, dct):
+	def _create_has_many_list(cls):
 		"""
 		Creates the has_many_list property, which contains all names of cached
 		properties.
 		"""
 		def get_has_many_list(self):
+			"""
+			Returns the _has_many_list-attribute. If it doesn't exists it will
+			be created.
+			"""
 			if not hasattr(self, '_has_many_list'):
 				self._has_many_list = []
 			return self._has_many_list
-		def set_has_many_list(self, list):
-			self._has_many_list = list
+		def set_has_many_list(self, vals):
+			"""
+			Sets the _has_many_list-attribute.
+			"""
+			self._has_many_list = vals
 		setattr(
 			cls, 
 			'has_many_list', 
@@ -320,10 +405,11 @@ class Base(object):
 	This should be overwritten by child-classes.
 	"""
 
-	def __init__(self, attrs={}, my_dn=None):
+	def __init__(self, attrs=None, my_dn=None):
 		"""
 		Initializes the object with the global connection...
 		"""
+		attrs = attrs or {}
 		if my_dn:
 			self.dn = my_dn
 		for key in self.attributes:
@@ -508,8 +594,6 @@ class Base(object):
 			return True
 		except ldap.LDAPError:
 			return False
-		
-		
 
 	# ------ helper methods ------
 	@classmethod

@@ -245,6 +245,45 @@ class AClassWithSignals(unittest.TestCase):
 		self.user.delete()
 		self.assertTrue(self.user.ev_before_delete)
 		self.assertTrue(self.user.ev_after_delete)
-		
+
+class AHasManyClassWithReferencesWhenDeletingTheReference(unittest.TestCase):
+	def setUp(self):
+		self.user = new_user()
+		self.phone = new_phone()
+		self.phone.save()
+		self.user.save()
+		self.phone.delete()
+
+	def test_should_delete_the_phone_id_on_the_user_object(self):
+		user = TestUser.find_by_id('user1')
+		self.assertEqual(user.deviceID, [])
+
+class AManyToManyFieldWithReferencesWhenDeleting(unittest.TestCase):
+	def setUp(self):
+		self.user1 = new_multiple_user()
+		self.user1.save()
+		self.user2 = new_multiple_user({
+			'userID': 'user2',
+			'deviceID': [
+				'phone1', 'phone2'
+			],
+		})
+		self.user2.save()
+		self.phone1 = new_phone()
+		self.phone1.save()
+		self.phone2 = new_phone({'phoneID': 'phone2'})
+		self.phone2.save()
+
+		self.phone1.delete()
+	
+	def test_user1_should_have_zero_phones(self):
+		user = TestMultipleUser.find_by_id('user1')
+		self.assertEqual(user.devices, [])
+	
+	def test_user2_should_have_only_one_phone(self):
+		user = TestMultipleUser.find_by_id('user2')
+		self.assertEqual(len(user.devices), 1)
+		self.assertEqual(user.devices[0].phoneID, 'phone2')
+
 if __name__ == '__main__':
 	unittest.main()
