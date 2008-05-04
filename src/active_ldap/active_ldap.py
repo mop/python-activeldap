@@ -5,6 +5,7 @@ derived.
 import ldap
 import re
 import os
+from signals.signals import Sendable, send_event
 
 class RelationField(object):
 	"""
@@ -193,7 +194,7 @@ class NullConnection(object):
 		"""
 		return []
 
-class LdapFetcher(type):
+class LdapFetcher(Sendable):
 	"""
 	This class autogenerates the ldap fields. It dynamically searches for
 	Relation-instances on the class and creates the appropriate relationship.
@@ -207,6 +208,9 @@ class LdapFetcher(type):
 		the appropriate relationship. Moreover it generates the properties for
 		the links.
 		"""
+		# First of all we have to enable signals on the appropriate class
+		super(LdapFetcher, cls).__init__(name, bases, dct)
+
 		if not hasattr(cls, 'connection'):
 			cls.connection = NullConnection()
 
@@ -222,8 +226,6 @@ class LdapFetcher(type):
 			)
 		if hasattr(cls, 'attributes') and isinstance(cls.attributes, dict):
 			cls._create_property_links()
-
-		super(LdapFetcher, cls).__init__(name, bases, dct)
 	
 	def _create_property_links(cls):
 		"""
@@ -449,6 +451,7 @@ class Base(object):
 		return map(lambda (id, attrs): cls(attrs, id), results)
 
 	# ---- creation methods -----
+	@send_event
 	def save(self):
 		""" Saves (creates or updates) the item """
 		try:
@@ -463,6 +466,7 @@ class Base(object):
 			return False
 		return True
 	
+	@send_event
 	def update(self):
 		""" Updates the item in the directory """
 		# Modify the DN via modrdn!
@@ -477,12 +481,14 @@ class Base(object):
 			), self.dn)
 		self.connection.modify_s(self._collect_dn(), self._collect_attrs())
 
+	@send_event
 	def create(self):
 		""" Creates the item in the directory """
 		attrs = self._collect_attrs()
 		attrs = [ ( i[1], i[2] ) for i in attrs ]
 		self.connection.add_s(self._collect_dn(), attrs)
 
+	@send_event
 	def delete(self):
 		"""
 		Deletes the item from the directory

@@ -56,6 +56,59 @@ class TestMultipleUser(Base):
 		other_attr='phoneID'
 	)
 
+class SignalTester(Base):
+	"""
+	This class tests the signal handling for ActiveLdap
+	"""
+	object_classes = (
+		'user', 
+		'person'
+	)
+	attributes = (
+		'userID',
+		'deviceID',
+		'name',
+		'mail',
+	)
+	dn_attribute = 'userID'
+	prefix = 'ou=user,o=schule'
+	scope = ldap.SCOPE_SUBTREE
+
+	def __init__(self, *args, **kwds):
+		self.reset_signal_flags()
+		super(SignalTester, self).__init__(*args, **kwds)
+
+	def reset_signal_flags(self):
+		self.ev_before_save = self.ev_after_save = False
+		self.ev_before_create = self.ev_after_create = False
+		self.ev_before_update = self.ev_after_update = False
+		self.ev_after_delete = self.ev_before_delete = False
+
+	def after_save(self):
+		self.ev_after_save = True
+	
+	def before_save(self):
+		self.ev_before_save = True
+
+	def after_create(self):
+		self.ev_after_create = True
+
+	def before_create(self):
+		self.ev_before_create = True
+
+	def after_update(self):
+		self.ev_after_update = True
+
+	def before_update(self):
+		self.ev_before_update = True
+
+	def after_delete(self):
+		self.ev_after_delete = True
+
+	def before_delete(self):
+		self.ev_before_delete = True
+
+
 def new_user(attrs={}):
 	default = { 
 		'userID': 'user1',
@@ -163,6 +216,35 @@ class ManyToManyRelationWithTwoUserAndTwoPhones(unittest.TestCase):
 	def test_should_return_one_user_for_device2(self):
 		self.assertEqual(len(self.phone2.testmultipleusers), 1)
 		self.assertEqual(self.phone2.testmultipleusers[0].userID, 'user2')
+
+class AClassWithSignals(unittest.TestCase):
+	def setUp(self):
+		self.user = SignalTester({
+			'userID': 'id',
+			'deviceID': 'dev_id',
+			'name': 'user_name',
+			'mail': 'mail',
+		})
+	
+	def test_should_notify_on_save(self):
+		self.user.save()
+		self.assertTrue(self.user.ev_before_save)
+		self.assertTrue(self.user.ev_after_save)
+
+	def test_should_notify_on_update(self):
+		self.user.update()
+		self.assertTrue(self.user.ev_before_update)
+		self.assertTrue(self.user.ev_after_update)
+
+	def test_should_notify_on_create(self):
+		self.user.create()
+		self.assertTrue(self.user.ev_before_create)
+		self.assertTrue(self.user.ev_after_create)
+
+	def test_should_notify_on_delete(self):
+		self.user.delete()
+		self.assertTrue(self.user.ev_before_delete)
+		self.assertTrue(self.user.ev_after_delete)
 		
 if __name__ == '__main__':
 	unittest.main()
