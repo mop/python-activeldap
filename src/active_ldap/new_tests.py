@@ -137,6 +137,29 @@ def new_phone(attrs={}):
 	default.update(attrs)
 	return TestPhone(default)
 
+def setup_many_to_many_relations(tester):
+	Base.connection = LdapStubber()
+	tester.user1 = new_multiple_user()
+	tester.user1.save()
+	tester.user2 = new_multiple_user({
+		'userID': 'user2',
+		'deviceID': [
+			'phone1', 'phone2'
+		],
+	})
+	tester.user2.save()
+	tester.phone1 = new_phone()
+	tester.phone1.save()
+	tester.phone2 = new_phone({'phoneID': 'phone2'})
+	tester.phone2.save()
+
+def setup_has_many_relations(tester):
+	Base.connection = LdapStubber()
+	tester.user  = new_user()
+	tester.phone = new_phone()
+	tester.phone.save()
+	tester.user.save()
+
 class Relationship(unittest.TestCase):
 	def setUp(self):
 		Base.connection = LdapStubber()
@@ -159,6 +182,7 @@ class Relationship(unittest.TestCase):
 class PropertyLinksAccess(unittest.TestCase):
 	def setUp(self):
 		self.user = new_user()
+
 	def test_should_create_the_correct_links(self):
 		self.assertEqual(self.user.user_id, 'user1')
 		self.assertEqual(self.user.device_id, 'phone1')
@@ -189,19 +213,7 @@ class PropertyLinksUpdateAssignment(unittest.TestCase):
 
 class ManyToManyRelationWithTwoUserAndTwoPhones(unittest.TestCase):
 	def setUp(self):
-		self.user1 = new_multiple_user()
-		self.user1.save()
-		self.user2 = new_multiple_user({
-			'userID': 'user2',
-			'deviceID': [
-				'phone1', 'phone2'
-			],
-		})
-		self.user2.save()
-		self.phone1 = new_phone()
-		self.phone1.save()
-		self.phone2 = new_phone({'phoneID': 'phone2'})
-		self.phone2.save()
+		setup_many_to_many_relations(self)
 	
 	def test_should_return_one_device_for_user1(self):
 		self.assertEqual(len(self.user1.devices), 1)
@@ -248,10 +260,7 @@ class AClassWithSignals(unittest.TestCase):
 
 class AHasManyClassWithReferencesWhenDeletingTheReference(unittest.TestCase):
 	def setUp(self):
-		self.user = new_user()
-		self.phone = new_phone()
-		self.phone.save()
-		self.user.save()
+		setup_has_many_relations(self)
 		self.phone.delete()
 
 	def test_should_delete_the_phone_id_on_the_user_object(self):
@@ -260,19 +269,7 @@ class AHasManyClassWithReferencesWhenDeletingTheReference(unittest.TestCase):
 
 class AManyToManyFieldWithReferencesWhenDeleting(unittest.TestCase):
 	def setUp(self):
-		self.user1 = new_multiple_user()
-		self.user1.save()
-		self.user2 = new_multiple_user({
-			'userID': 'user2',
-			'deviceID': [
-				'phone1', 'phone2'
-			],
-		})
-		self.user2.save()
-		self.phone1 = new_phone()
-		self.phone1.save()
-		self.phone2 = new_phone({'phoneID': 'phone2'})
-		self.phone2.save()
+		setup_many_to_many_relations(self)
 
 		self.phone1.delete()
 	
@@ -284,6 +281,32 @@ class AManyToManyFieldWithReferencesWhenDeleting(unittest.TestCase):
 		user = TestMultipleUser.find_by_id('user2')
 		self.assertEqual(len(user.devices), 1)
 		self.assertEqual(user.devices[0].phoneID, 'phone2')
+
+class AHasManyClassWithReferencesWhenModifyingTheDn(unittest.TestCase):
+	def setUp(self):
+		setup_has_many_relations(self)
+		self.phone1 = TestPhone.find_by_id('phone1')
+		self.phone1.phoneID = 'phone_new_id'
+		self.phone1.save()
+	
+	def test_should_update_the_deviceID_on_the_user(self):
+		user = TestUser.find_by_id('user1')
+		self.assertEqual(user.deviceID, 'phone_new_id')
+
+class AManyToManyClassWithReferencesWhenModifyingTheDn(unittest.TestCase):
+	def setUp(self):
+		setup_many_to_many_relations(self)
+		self.phone1 = TestPhone.find_by_id('phone1')
+		self.phone1.phoneID = 'phone_new_id'
+		self.phone1.save()
+
+	def test_should_update_the_deviceID_on_user1(self):
+		user = TestMultipleUser.find_by_id('user1')
+		self.assertEqual(user.deviceID, 'phone_new_id')
+
+	def test_should_update_the_deviceID_on_user2(self):
+		user = TestMultipleUser.find_by_id('user2')
+		self.assertEqual(user.deviceID, [ 'phone_new_id', 'phone2' ])
 
 if __name__ == '__main__':
 	unittest.main()

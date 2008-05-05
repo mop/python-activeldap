@@ -41,6 +41,9 @@ class LdapElement(object):
 				value = [ value ]
 			setattr(self, attr, value)
 
+	def __repr__(self):
+		return '<LdapStubber %s>' % self.dn
+
 	def modify(self, attrs):
 		"""
 		Modifies the element

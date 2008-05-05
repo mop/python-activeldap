@@ -59,6 +59,34 @@ def referenced_object_deleted(self, obj):
 		attr.remove(deleted_id)
 		setattr(item, self.my_attr, attr)
 		item.save()
+
+def referenced_object_renamed(self, new_obj):
+	"""
+	This method is called from the referenced class if an instance of it was
+	updated. It checks if the object was renamed and if it was renamed it
+	updates the foreign keys in the other classes.
+
+	new_obj -- the object which was updated
+	"""
+	old_dn = new_obj._value_from_full_dn()
+	if old_dn is None:
+		return
+	old_obj = new_obj.__class__.find_by_id(old_dn)
+	old_attr = getattr(old_obj, self.other_attr)
+	new_attr = getattr(new_obj, self.other_attr)
+	if old_attr == new_attr:
+		return
+
+	# Change the foreign keys
+	name = '%ss' % self.my_class.__name__.lower()
+	items = getattr(old_obj, name)
+	for item in items:
+		attr = getattr(item, self.my_attr)
+		if not isinstance(attr, list):
+			attr = [ attr ]
+		attr[attr.index(old_attr)] = new_attr
+		setattr(item, self.my_attr, attr)
+		item.save()
 		
 class ForeignKey(RelationField):
 	"""
@@ -129,6 +157,10 @@ class ForeignKey(RelationField):
 		self.other_class.events.register(
 			'before_delete', 
 			lambda event, instance: referenced_object_deleted(self, instance)
+		)
+		self.other_class.events.register(
+			'before_update', 
+			lambda event, instance: referenced_object_renamed(self, instance)
 		)
 		self.my_class = cls
 
@@ -221,6 +253,10 @@ class ManyToManyField(RelationField):
 		self.other_class.events.register(
 			'before_delete', 
 			lambda event, instance: referenced_object_deleted(self, instance)
+		)
+		self.other_class.events.register(
+			'before_update', 
+			lambda event, instance: referenced_object_renamed(self, instance)
 		)
 		self.my_class = cls
 
@@ -535,6 +571,25 @@ class Base(object):
 			'(&%s%s)' % (cls._classes_string(), filter_expression)
 		)
 		return map(lambda (id, attrs): cls(attrs, id), results)
+
+	def has_dn_changed(self):
+		"""
+		Returns true if the DN-attribute of the object has changed.
+		"""
+		if self.dn == None:
+			return True
+		return self._value_from_full_dn() != getattr(self, self.dn_attribute)
+
+	def _value_from_full_dn(self):
+		"""
+		Returns the value from the full-dn
+		"""
+		if not hasattr(self, 'dn'):
+			return None
+		return re.match(
+			r'^(?P<attribute>.*?)=(?P<value>.*?),.*$',
+			self.dn
+		).group('value')
 
 	# ---- creation methods -----
 	@send_event

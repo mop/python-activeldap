@@ -91,6 +91,7 @@ class ModifyingTheDN(unittest.TestCase):
 		self.newdn = 'ou=newschule'
 		self.stubber.add_s(self.dn, new_element())
 		self.stubber.modrdn_s(self.dn, self.newdn, True)
+
 	def test_should_change_the_dn(self):
 		self.assertEqual(self.stubber.elements[0].dn, 'ou=newschule,o=lestwo')
 
