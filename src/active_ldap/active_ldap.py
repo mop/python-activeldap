@@ -510,28 +510,54 @@ class Base(object):
 					ldap.OPT_NETWORK_TIMEOUT,
 					cls.config['timeout']
 				)
+			cls._init_ssl()
 			cls.connection = ldap.initialize(cls.config['uri'])
 
-			if cls.config['uri'].startswith('ldaps'):
-				cls._init_certs()
-				cls.connection.start_tls_s()
-			cls.connection.simple_bind_s(
-				cls.config['bind_dn'],
-				cls.config['bind_password']
-			)
+			if 'bind_dn' in cls.config and 'bind_password' in cls.config:
+				cls.connection.simple_bind_s(
+					cls.config['bind_dn'],
+					cls.config['bind_password']
+				)
 			return cls.connection
 		except ldap.LDAPError, ldap.TIMEOUT:
+			import traceback
+			traceback.print_exc()
 			del cls.connection
+
+	@classmethod
+	def _init_ssl(cls):
+		if not cls.config['uri'].startswith('ldaps'):
+			return
+		cls._init_certs_required()
+		cls._init_certs()
+		#cls.connection.start_tls_s()
 	
+	@classmethod
+	def _init_certs_required(cls):
+		if not 'cert_required' in cls.config:
+			return
+		ldap.set_option(
+			ldap.OPT_X_TLS_REQUIRE_CERT,
+			cls.config['cert_required']
+		)
+
 	@classmethod
 	def _init_certs(cls):
 		""" 
 		Initializes the certs 
 		"""
-		if cls.config['cert_path'] == None:
-			return
-		cert = os.path.abspath(cls.config['cert_path'])
-		ldap.set_option(ldap.OPT_X_TLS_CERTFILE, cert)
+		if 'cert_file' in cls.config:
+			cert = os.path.abspath(cls.config['cert_file'])
+			ldap.set_option(ldap.OPT_X_TLS_CERTFILE, cert)
+		if 'key_file' in cls.config:
+			cert = os.path.abspath(cls.config['key_file'])
+			ldap.set_option(ldap.OPT_X_TLS_KEYFILE, cert)
+		if 'ca_file' in cls.config:
+			cert = os.path.abspath(cls.config['ca_file'])
+			ldap.set_option(ldap.OPT_X_TLS_CACERTFILE, cert)
+		if 'ca_dir' in cls.config:
+			cert = os.path.abspath(cls.config['ca_dir'])
+			ldap.set_option(ldap.OPT_X_TLS_CACERTDIR, cert)
 
 	@classmethod
 	def find_by_id(cls, elem_id):
